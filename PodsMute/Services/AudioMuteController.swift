@@ -50,6 +50,57 @@ final class AudioMuteController: ObservableObject {
         setMute(!isMuted)
     }
 
+    /// Thread-safe toggle for use off the main thread (e.g. from the notification
+    /// dispatch queue). Queries the current default input device and its mute state
+    /// directly from Core Audio — synchronous C calls that are safe on any thread —
+    /// flips it, and publishes the new state on the main queue for the UI.
+    ///
+    /// This avoids hopping to the main run loop to perform the actual mute, which
+    /// matters because macOS throttles this background app's main run loop when idle
+    /// (App Nap): the mic must mute the instant you press, not whenever the app next
+    /// wakes up.
+    /// - Returns: the new muted state, or `nil` if there is no controllable input.
+    @discardableResult
+    func toggleMuteThreadSafe() -> Bool? {
+        var deviceAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var device = AudioObjectID(kAudioObjectUnknown)
+        var deviceSize = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
+                                         &deviceAddress, 0, nil, &deviceSize, &device) == noErr,
+              device != kAudioObjectUnknown else {
+            print("[AudioMuteController] toggleMuteThreadSafe: no input device")
+            return nil
+        }
+
+        var muteAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectHasProperty(device, &muteAddress) else {
+            print("[AudioMuteController] toggleMuteThreadSafe: device has no mute control")
+            return nil
+        }
+
+        var current: UInt32 = 0
+        var valueSize = UInt32(MemoryLayout<UInt32>.size)
+        AudioObjectGetPropertyData(device, &muteAddress, 0, nil, &valueSize, &current)
+
+        var newValue: UInt32 = current == 0 ? 1 : 0
+        let result = AudioObjectSetPropertyData(device, &muteAddress, 0, nil,
+                                                UInt32(MemoryLayout<UInt32>.size), &newValue)
+        guard result == noErr else {
+            print("[AudioMuteController] toggleMuteThreadSafe: set failed \(result)")
+            return nil
+        }
+
+        let muted = newValue != 0
+        DispatchQueue.main.async { self.isMuted = muted }
+        return muted
+    }
+
     /// Set the mute state of the default input device.
     /// - Parameter muted: Whether to mute (true) or unmute (false)
     func setMute(_ muted: Bool) {

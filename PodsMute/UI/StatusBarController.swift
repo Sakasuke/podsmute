@@ -20,6 +20,10 @@ final class StatusBarController {
     private var cancellables = Set<AnyCancellable>()
     private var mutePopover: NSPopover?
 
+    /// The right-click menu. Kept off `statusItem.menu` so a plain left-click fires
+    /// our action (one-tap mute toggle) instead of always popping the menu open.
+    private var contextMenu: NSMenu?
+
     // Menu item tags for updating
     private enum MenuItemTag: Int {
         case muteStatus = 100
@@ -141,7 +145,9 @@ final class StatusBarController {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
+        // Store the menu but DON'T assign it to statusItem.menu — assigning it makes
+        // every click open the menu. We attach it on demand only for right-clicks.
+        contextMenu = menu
     }
 
     private func setupObservers() {
@@ -276,7 +282,7 @@ final class StatusBarController {
     }
 
     private func updateMenuItems() {
-        guard let menu = statusItem.menu else { return }
+        guard let menu = contextMenu else { return }
 
         // Update mute status with colored text
         if let muteItem = menu.item(withTag: MenuItemTag.muteStatus.rawValue) {
@@ -346,13 +352,17 @@ final class StatusBarController {
     // MARK: - Actions
 
     @objc private func statusBarButtonClicked(_ sender: AnyObject?) {
-        guard let event = NSApp.currentEvent else { return }
+        let event = NSApp.currentEvent
 
-        if event.type == .rightMouseUp {
-            // Right-click: show menu (handled automatically by NSStatusItem)
+        // Right-click (or Control-click): show the menu. We attach it to the status
+        // item just for this click, then detach so the next left-click toggles again.
+        if let event = event,
+           event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
+            statusItem.menu = contextMenu
             statusItem.button?.performClick(nil)
+            statusItem.menu = nil
         } else {
-            // Left-click: toggle mute
+            // Left-click: one-tap microphone on/off.
             toggleMute()
         }
     }

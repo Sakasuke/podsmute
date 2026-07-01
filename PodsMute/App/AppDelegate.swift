@@ -29,10 +29,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Keep reference to BluetoothManager for device detection (status display)
     private var bluetoothManager: BluetoothManager!
 
+    // Held for the app's lifetime to keep macOS App Nap from throttling our run loop.
+    // Without this, this background (LSUIElement) app gets napped when idle and the
+    // audioaccessoryd Darwin notification is delivered late or coalesced away — so a
+    // stem press would sometimes not toggle the mic until much later.
+    private var activityToken: NSObjectProtocol?
+
     // MARK: - App Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("[AppDelegate] Application launching...")
+
+        // Opt out of App Nap so mute-gesture notifications are handled immediately.
+        // (Allows idle system sleep — we don't need to keep the whole Mac awake.)
+        activityToken = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep],
+            reason: "Listening for AirPods mute-gesture notifications")
 
         // Initialize services
         setupServices()
@@ -89,18 +101,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // confirm which notification your macOS version posts when you press the stem.
         audioAccessoryMonitor.debugMode = ProcessInfo.processInfo.environment["PODSMUTE_DEBUG"] != nil
 
-        // Set up callback for mute state changes from AirPods
-        audioAccessoryMonitor.onMuteStateChanged = { [weak self] state in
+        // Set up callback for mute state changes from AirPods.
+        // NOTE: this runs on the monitor's background queue. Do the actual mute here
+        // (off-main, so an App-Napped main run loop can't delay it), then hop to main
+        // only for the menu-bar UI.
+        audioAccessoryMonitor.onMuteStateChanged = { [weak self] _ in
             guard let self = self else { return }
 
-            print("[AppDelegate] AirPods mute state notification received!")
+            print("[AppDelegate] AirPods mute gesture detected")
 
-            // Toggle system mute when AirPods triggers mute
-            self.audioController.toggleMute()
-            self.statusBarController.updateIcon()
+            // Toggle system mute immediately (thread-safe, direct Core Audio).
+            let muted = self.audioController.toggleMuteThreadSafe()
 
-            // Show popover feedback
-            self.statusBarController.showMutePopover(isMuted: self.audioController.isMuted)
+            DispatchQueue.main.async {
+                self.statusBarController.updateIcon()
+                if let muted = muted {
+                    self.statusBarController.showMutePopover(isMuted: muted)
+                }
+            }
         }
 
         // Debug: log all notifications

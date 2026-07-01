@@ -16,8 +16,14 @@ let package = Package(
         .macOS(.v13)
     ],
     targets: [
+        // C shim that re-exports <notify.h> (notify_register_dispatch, etc.).
+        .target(
+            name: "CNotify",
+            path: "CNotify"
+        ),
         .executableTarget(
             name: "PodsMute",
+            dependencies: ["CNotify"],
             path: "PodsMute",
             exclude: [
                 "App/PodsMuteApp.swift",   // SwiftUI @main — used only by the Xcode build
