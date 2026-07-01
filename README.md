@@ -26,6 +26,14 @@ AirPods stem press ──▶ audioaccessoryd posts a Darwin notification
 
 ## 使い方 (クイックスタート)
 
+### 0. DMG からインストール（ビルド不要）
+
+`dist/PodsMute.dmg` をダブルクリック → **PodsMute を Applications フォルダにドラッグ** → `/Applications/PodsMute.app` を起動。
+
+> ⚠️ **初回起動**: このアプリはあなたのMac用にローカル署名(ad-hoc)しているため、初回は「開発元を確認できない」と出ます。**アプリを右クリック → 「開く」**、または **システム設定 → プライバシーとセキュリティ → 「このまま開く」** で一度許可すればOKです。
+
+自分でビルドし直す/DMGを作り直す場合は下記。
+
 ### 1. ビルド（フル Xcode は不要）
 
 このフォークは **Command Line Tools だけ** でビルドできます（`swift` があれば OK）。
@@ -35,14 +43,9 @@ cd Airpods-mute
 ./build.sh
 ```
 
-`dist/PodsMute.app` が生成されます。任意でアプリケーションに入れます:
+`dist/PodsMute.app` が生成されます（DMG も作るなら `./make-dmg.sh` → `dist/PodsMute.dmg`）。
 
-```bash
-cp -R dist/PodsMute.app /Applications/
-open /Applications/PodsMute.app
-```
-
-メニューバーにヘッドフォンのアイコンが出れば起動しています。
+メニューバーにヘッドフォンのアイコンが出れば起動しています。**アイコンを左クリックで一発ミュートON/OFF**、右クリック（またはControl+クリック）でメニューです。
 
 ### 2. macOS 側で AirPods のミュートジェスチャを有効化
 
