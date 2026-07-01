@@ -2,13 +2,24 @@
 //  AudioAccessoryMonitor.swift
 //  PodsMute
 //
-//  Monitors audioaccessoryd Darwin notifications for AirPods Max mute state changes.
-//  This captures the native mute button events from AirPods Max crown button.
+//  Monitors audioaccessoryd Darwin notifications for AirPods mute-gesture events.
+//  When you press the AirPods Pro stem (or AirPods Max crown) during a call, macOS's
+//  audioaccessoryd emits a Darwin notification. We catch it and toggle the system mic.
+//
+//  Fork changes (Airpods-mute):
+//    - Coalesce/debounce rapid duplicate notifications so one physical press = one toggle.
+//    - Suppress the "echo" that fires immediately after WE change the mute state
+//      (which would otherwise instantly undo the toggle).
+//    - Speculative/extra notification names and the noisy distributed-center listeners
+//      are gated behind `debugMode` (off by default) instead of always-on.
+//    - Diagnostics go through os.Logger so they're visible in Console.app even when the
+//      app is launched as a bundle (where stdout/print is not visible).
 //
 
 import Foundation
+import os
 
-/// Monitors Darwin notifications from audioaccessoryd for AirPods mute state changes
+/// Monitors Darwin notifications from audioaccessoryd for AirPods mute-gesture events.
 final class AudioAccessoryMonitor {
 
     // MARK: - Types
@@ -19,171 +30,178 @@ final class AudioAccessoryMonitor {
         case unknown
     }
 
-    // MARK: - Properties
+    // MARK: - Public configuration
 
-    /// Callback when mute state changes from AirPods
+    /// Callback fired (on the main queue) when an AirPods mute gesture is detected.
     var onMuteStateChanged: ((MuteState) -> Void)?
 
-    /// Debug callback for all notifications
+    /// Debug callback for every raw notification name that is received.
     var onNotification: ((String) -> Void)?
 
+    /// When true, also registers the speculative extra notification names and the
+    /// distributed-center listeners, and logs every notification. Useful for figuring
+    /// out which notification your macOS version actually posts. Off by default because
+    /// the extra listeners are noisy and can echo our own mute changes.
+    var debugMode: Bool = false
+
+    /// Minimum time between two accepted toggles. Kills the echo that audioaccessoryd /
+    /// CoreAudio emit right after we set the mute property, while still allowing a real
+    /// human double-press (which is always slower than this).
+    var debounceInterval: TimeInterval = 0.3
+
+    // MARK: - Private state
+
     private var isMonitoring = false
+    private var lastAcceptedEvent: TimeInterval = 0
+    private let log = Logger(subsystem: "com.podsmute.app", category: "AudioAccessoryMonitor")
 
-    // Darwin notification name from audioaccessoryd
-    private let muteStateNotification = "com.apple.audioaccessoryd.MuteState"
+    /// The notification audioaccessoryd posts when the AirPods mute state changes.
+    private let primaryNotification = "com.apple.audioaccessoryd.MuteState"
 
-    // Additional notifications to try
-    private let additionalNotifications = [
+    /// Extra names to *also* watch when `debugMode` is on. These are speculative — some
+    /// may never fire, and some ("…mute.changed") can be echoes of our own change, so
+    /// they are only enabled for diagnostics.
+    private let debugExtraNotifications = [
         "com.apple.AudioAccessory.cdMsgNotification",
         "com.apple.audio.device.mute.changed",
         "com.apple.coreaudio.defaultdevicechanged",
+        "com.apple.audio.MuteStateChanged",
+        "AAMuteStateChanged",
     ]
 
-    // MARK: - Initialization
+    // MARK: - Init
 
     init() {}
 
-    deinit {
-        stopMonitoring()
-    }
+    deinit { stopMonitoring() }
 
-    // MARK: - Public Methods
+    // MARK: - Public methods
 
-    /// Start monitoring Darwin notifications for mute state changes
     @discardableResult
     func startMonitoring() -> Bool {
         guard !isMonitoring else {
-            print("[AudioAccessoryMonitor] Already monitoring")
+            log.debug("Already monitoring")
             return true
         }
 
-        // Register for the main mute state notification
-        registerDarwinNotification(muteStateNotification)
+        // Always listen for the primary mute-state notification.
+        registerDarwinNotification(primaryNotification)
 
-        // Also register for additional notifications that might be relevant
-        for notification in additionalNotifications {
-            registerDarwinNotification(notification)
+        // In debug mode, cast a wider net to help discover the right name / behaviour.
+        if debugMode {
+            for name in debugExtraNotifications {
+                registerDarwinNotification(name)
+            }
+            registerDistributedNotifications()
         }
 
-        // Also try CFNotificationCenter for distributed notifications
-        registerDistributedNotifications()
-
         isMonitoring = true
-        print("[AudioAccessoryMonitor] Started monitoring audioaccessoryd notifications")
-        print("[AudioAccessoryMonitor] Listening for: \(muteStateNotification)")
-
+        log.info("Started monitoring. Listening for \(self.primaryNotification, privacy: .public)")
         return true
     }
 
-    /// Stop monitoring notifications
     func stopMonitoring() {
         guard isMonitoring else { return }
 
-        // Unregister Darwin notifications
-        unregisterDarwinNotification(muteStateNotification)
-        for notification in additionalNotifications {
-            unregisterDarwinNotification(notification)
+        unregisterDarwinNotification(primaryNotification)
+        if debugMode {
+            for name in debugExtraNotifications {
+                unregisterDarwinNotification(name)
+            }
+            CFNotificationCenterRemoveEveryObserver(
+                CFNotificationCenterGetDistributedCenter(),
+                Unmanaged.passUnretained(self).toOpaque()
+            )
         }
 
-        // Unregister distributed notifications
-        CFNotificationCenterRemoveEveryObserver(
-            CFNotificationCenterGetDistributedCenter(),
-            Unmanaged.passUnretained(self).toOpaque()
-        )
-
         isMonitoring = false
-        print("[AudioAccessoryMonitor] Stopped monitoring")
+        log.info("Stopped monitoring")
     }
 
-    // MARK: - Private Methods - Darwin Notifications
+    // MARK: - Event handling
+
+    /// Called for every raw notification. Decides whether it represents a mute gesture
+    /// and, if so, forwards a single debounced event to `onMuteStateChanged`.
+    private func handleNotification(_ name: String) {
+        log.debug("Notification received: \(name, privacy: .public)")
+        onNotification?(name)
+
+        // Only mute-related notifications drive a toggle.
+        guard name.contains("MuteState") || name.lowercased().contains("mute") else { return }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let sinceLast = now - lastAcceptedEvent
+        guard sinceLast >= debounceInterval else {
+            // Almost certainly the echo of our own mute change, or a duplicate of the
+            // same physical press delivered under several notification names.
+            log.debug("Ignored mute notification (debounced, \(String(format: "%.3f", sinceLast))s since last)")
+            return
+        }
+        lastAcceptedEvent = now
+
+        // Darwin notifications carry no payload, so we can't read the intended state —
+        // the AppDelegate just toggles the current mute state.
+        DispatchQueue.main.async { [weak self] in
+            self?.onMuteStateChanged?(.unknown)
+        }
+    }
+
+    // MARK: - Darwin notifications
 
     private func registerDarwinNotification(_ name: String) {
-        let notifyCenter = CFNotificationCenterGetDarwinNotifyCenter()
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
 
-        let callback: CFNotificationCallback = { center, observer, name, object, userInfo in
+        let callback: CFNotificationCallback = { _, observer, name, _, _ in
             guard let observer = observer else { return }
             let monitor = Unmanaged<AudioAccessoryMonitor>.fromOpaque(observer).takeUnretainedValue()
-
             let notificationName = name?.rawValue as String? ?? "unknown"
-            print("[AudioAccessoryMonitor] Darwin notification received: \(notificationName)")
-
-            monitor.onNotification?(notificationName)
-
-            // Handle mute state notification
-            if notificationName.contains("MuteState") || notificationName.contains("mute") {
-                // Darwin notifications don't carry payload, so we just know something changed
-                // The actual state would need to be queried separately
-                DispatchQueue.main.async {
-                    monitor.onMuteStateChanged?(.unknown)
-                }
-            }
+            monitor.handleNotification(notificationName)
         }
 
         CFNotificationCenterAddObserver(
-            notifyCenter,
+            center,
             Unmanaged.passUnretained(self).toOpaque(),
             callback,
             name as CFString,
             nil,
             .deliverImmediately
         )
-
-        print("[AudioAccessoryMonitor] Registered for Darwin notification: \(name)")
+        log.debug("Registered Darwin notification: \(name, privacy: .public)")
     }
 
     private func unregisterDarwinNotification(_ name: String) {
-        let notifyCenter = CFNotificationCenterGetDarwinNotifyCenter()
-
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterRemoveObserver(
-            notifyCenter,
+            center,
             Unmanaged.passUnretained(self).toOpaque(),
             CFNotificationName(name as CFString),
             nil
         )
     }
 
-    // MARK: - Private Methods - Distributed Notifications
+    // MARK: - Distributed notifications (debug only)
 
     private func registerDistributedNotifications() {
-        let distCenter = CFNotificationCenterGetDistributedCenter()
+        let center = CFNotificationCenterGetDistributedCenter()
 
-        // Watch for any audio-related distributed notifications
-        let notificationsToWatch = [
-            "com.apple.audioaccessoryd.MuteState",
-            "com.apple.audio.MuteStateChanged",
-            "AAMuteStateChanged",
-        ]
-
-        let callback: CFNotificationCallback = { center, observer, name, object, userInfo in
+        let callback: CFNotificationCallback = { _, observer, name, object, _ in
             guard let observer = observer else { return }
             let monitor = Unmanaged<AudioAccessoryMonitor>.fromOpaque(observer).takeUnretainedValue()
-
             let notificationName = name?.rawValue as String? ?? "unknown"
             let objectStr = object.map { String(describing: $0) } ?? "nil"
-
-            print("[AudioAccessoryMonitor] Distributed notification: \(notificationName), object: \(objectStr)")
-
-            monitor.onNotification?("Distributed: \(notificationName)")
-
-            DispatchQueue.main.async {
-                monitor.onMuteStateChanged?(.unknown)
-            }
+            monitor.log.debug("Distributed: \(notificationName, privacy: .public) object=\(objectStr, privacy: .public)")
+            monitor.handleNotification("Distributed:\(notificationName)")
         }
 
-        for notification in notificationsToWatch {
+        for name in [primaryNotification, "com.apple.audio.MuteStateChanged", "AAMuteStateChanged"] {
             CFNotificationCenterAddObserver(
-                distCenter,
+                center,
                 Unmanaged.passUnretained(self).toOpaque(),
                 callback,
-                notification as CFString,
+                name as CFString,
                 nil,
                 .deliverImmediately
             )
-            print("[AudioAccessoryMonitor] Registered for distributed notification: \(notification)")
         }
-
-        // Also register for ANY notification (for debugging) - use nil name
-        // This is commented out as it would be very noisy
-        // CFNotificationCenterAddObserver(distCenter, context, callback, nil, nil, .deliverImmediately)
     }
 }

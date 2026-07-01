@@ -1,129 +1,138 @@
-# PodsMute
+# PodsMute (Airpods-mute fork)
 
-A macOS menu bar application that detects AirPods button presses and toggles system-wide microphone mute.
+A macOS menu bar app that turns the **AirPods mute gesture** into a **system‑wide microphone mute** — so a single press of your AirPods Pro stem mutes/unmutes you in **Google Meet, Zoom, and Slack huddles** (and every other app), no matter whether that app supports the AirPods mute feature itself.
 
-## Supported Devices
+This is a fork of [cyanicr/podsmute](https://github.com/cyanicr/podsmute). See [What this fork adds](#what-this-fork-adds).
 
-- AirPods Max (crown button)
-- AirPods Pro (stem press)
+---
 
-## Features
+## なぜ効くのか / How it works
 
-- **Button Detection**: Press on AirPods toggles microphone mute
-- **Menu Bar Integration**: Shows headphones icon with colored mic badge (green = unmuted, red = muted)
-- **Visual Feedback**: Popover appears briefly when mute state changes
-- **Connection Status**: View AirPods connection state in the menu
-- **Light/Dark Mode**: Icon adapts to menu bar appearance
-- **Restore on Quit**: Microphone is restored to unmuted when app exits
+普通のアプリ (Meet / Zoom / Slack) は AirPods の「ミュート」ジェスチャに対応していません。このアプリは、AirPods を押したときに macOS の `audioaccessoryd` が出す通知 (`com.apple.audioaccessoryd.MuteState`) を捕まえ、**Core Audio で入力デバイス自体をミュート**します。入力デバイスをミュートするので、**どのアプリを使っていても相手にはあなたの声が届きません。**
+
+```
+AirPods stem press ──▶ audioaccessoryd posts a Darwin notification
+                          │
+                          ▼
+                    PodsMute catches it
+                          │
+                          ▼
+        Core Audio: default input device mute = ON/OFF   ← works in ALL apps
+```
+
+> **重要:** これは OS レベルのミュートです。Meet / Zoom / Slack の *アプリ内* ミュートボタンの表示とは連動しません。アプリ側が「ミュート解除」に見えても、メニューバーのバッジが赤 (Muted) なら相手には聞こえていません。**メニューバーのバッジが正解の状態です。**
+
+---
+
+## 使い方 (クイックスタート)
+
+### 1. ビルド（フル Xcode は不要）
+
+このフォークは **Command Line Tools だけ** でビルドできます（`swift` があれば OK）。
+
+```bash
+cd Airpods-mute
+./build.sh
+```
+
+`dist/PodsMute.app` が生成されます。任意でアプリケーションに入れます:
+
+```bash
+cp -R dist/PodsMute.app /Applications/
+open /Applications/PodsMute.app
+```
+
+メニューバーにヘッドフォンのアイコンが出れば起動しています。
+
+### 2. macOS 側で AirPods のミュートジェスチャを有効化
+
+1. AirPods Pro のファームウェアを最新に（**mute/unmute は 6A300 以降**が必要）。
+2. **システム設定 → (サイドバーの) お使いの AirPods** を開く。
+3. 通話コントロールで、ステムの **1回押し** または **2回押し** に **「ミュート / ミュート解除 (Mute & unmute)」** を割り当てる。
+
+### 3. 通話中に使う
+
+Meet / Zoom / Slack ハドルなどで **マイクが使われている状態**(=通話中)にステムを押すと、PodsMute がミュート/解除します。メニューバーのバッジで確認:
+
+- 🟢 緑のマイク = ミュート解除（相手に聞こえる）
+- 🔴 赤のマイク（スラッシュ）= ミュート（相手に聞こえない）
+
+左クリックでも手動トグル、右クリックでメニューが出ます。
+
+---
+
+## What this fork adds
+
+| Area | Upstream | This fork |
+| --- | --- | --- |
+| Build | Requires full **Xcode** + `xcodegen` | Also builds with **Command Line Tools only** via `Package.swift` + `build.sh` (`swift build`) |
+| Entry point | SwiftUI `@main` (`App/PodsMuteApp.swift`) | Adds AppKit `App/main.swift` for the SPM build (SwiftUI file kept for the Xcode build) |
+| Mute detection | Registers several speculative notifications + distributed‑center listeners **always on** | Listens to `com.apple.audioaccessoryd.MuteState` by default; **debounces duplicates** and **suppresses the echo** from our own mute change so one press = one toggle; extra names gated behind `PODSMUTE_DEBUG` |
+| Diagnostics | `print` to stdout (invisible when launched as a bundle) | `os.Logger` (subsystem `com.podsmute.app`) visible in **Console.app**, plus a `PODSMUTE_DEBUG=1` mode |
+
+Both build paths still share the same services (`AudioMuteController`, `AudioAccessoryMonitor`, `BluetoothManager`, `StatusBarController`).
+
+### Two ways to build
+
+- **No Xcode (recommended here):** `./build.sh`
+- **With Xcode:** `brew install xcodegen && xcodegen generate && open PodsMute.xcodeproj` (upstream flow)
+
+---
+
+## Verifying it works (without a live call)
+
+You can simulate an AirPods press by posting the same Darwin notification, then check the input device's mute state flips:
+
+```bash
+open dist/PodsMute.app
+# in another shell:
+notifyutil -p com.apple.audioaccessoryd.MuteState   # = one "press"
+```
+
+Watch the menu bar badge toggle red/green. This is exactly how this fork was verified.
+
+## Diagnostics / Troubleshooting
+
+**Nothing happens when I press my AirPods during a call.**
+The most likely cause is that macOS didn't post `com.apple.audioaccessoryd.MuteState`. Confirm what your macOS version emits:
+
+```bash
+# Run the app in diagnostic mode (logs every notification, watches extra names):
+PODSMUTE_DEBUG=1 dist/PodsMute.app/Contents/MacOS/PodsMute
+```
+
+Then, in **Console.app**, filter by subsystem `com.podsmute.app` (or run):
+
+```bash
+log stream --level debug --predicate 'subsystem == "com.podsmute.app"'
+```
+
+Press your AirPods during a call and look for `Notification received: …`.
+- If you see it → detection works; check that your input device supports mute (below).
+- If you see nothing → the OS isn't posting the notification. Make sure the AirPods firmware is ≥ 6A300, the "Mute & unmute" gesture is assigned, and you're actually in a call (an app is using the mic).
+
+**The badge toggles but I'm still heard (or still muted).**
+Your default input device must support the Core Audio mute property. Check the current one:
+- System Settings → Sound → Input. The built‑in mic and AirPods both support mute on recent macOS.
+
+**The app's own mute button (Zoom/Meet) disagrees with the badge.**
+Expected — this app mutes at the OS level, independent of the app's button. Trust the menu bar badge.
+
+## Run at login
+
+Copy the app to `/Applications`, then add it in **System Settings → General → Login Items → Open at Login**.
 
 ## Requirements
 
-- macOS 14.0+ (Sonoma)
-- Xcode 15.0+
-- AirPods Max or AirPods Pro (paired via Bluetooth)
-
-## Project Structure
-
-```
-PodsMute/
-├── App/
-│   ├── PodsMuteApp.swift             # SwiftUI App entry point
-│   ├── AppDelegate.swift             # App lifecycle & service wiring
-│   └── Info.plist                    # App configuration
-├── UI/
-│   └── StatusBarController.swift     # Menu bar icon & menu
-├── Services/
-│   ├── AudioMuteController.swift     # Core Audio mute control
-│   ├── AudioAccessoryMonitor.swift   # Darwin notification listener
-│   └── BluetoothManager.swift        # Bluetooth connection status
-├── Bridge/
-│   └── PodsMute-Bridging-Header.h    # Bridging header for IOBluetooth
-├── Resources/
-│   └── Assets.xcassets/              # App icon
-└── PodsMute.entitlements
-```
-
-## Building
-
-### Using xcodegen (Recommended)
-
-1. Install xcodegen:
-   ```bash
-   brew install xcodegen
-   ```
-
-2. Generate Xcode project:
-   ```bash
-   xcodegen generate
-   ```
-
-3. Open in Xcode:
-   ```bash
-   open PodsMute.xcodeproj
-   ```
-
-4. Build and run (Cmd+R)
-
-## Usage
-
-1. Launch the app (it appears in the menu bar with a headphones icon)
-2. The app automatically detects your paired AirPods
-3. Press the crown button (Max) or stem (Pro) to toggle microphone mute
-4. A popover briefly shows "Microphone On" or "Microphone Off"
-5. The mic badge on the icon updates:
-   - Green mic: Unmuted
-   - Red mic with slash: Muted
-
-### Menu Options
-
-- **Left-click**: Toggle mute
-- **Right-click**: Show menu
-  - Microphone status
-  - Toggle Mute (Cmd+M)
-  - AirPods connection status
-  - Device name
-  - Reconnect (Cmd+R)
-  - About PodsMute
-  - Quit (Cmd+Q)
-
-## Technical Details
-
-### How It Works
-
-The app listens for Darwin notifications from `audioaccessoryd`, the macOS daemon that handles audio accessory events. When AirPods trigger a mute action, the daemon emits a `com.apple.audioaccessoryd.MuteState` notification which this app intercepts to toggle the system microphone.
-
-### Audio Mute
-
-Uses Core Audio HAL APIs:
-- `kAudioHardwarePropertyDefaultInputDevice` - Get default mic
-- `kAudioDevicePropertyMute` - Get/set mute state
-
-### Bluetooth Status
-
-Uses IOBluetooth to check connection status of paired AirPods devices for display purposes.
-
-## Troubleshooting
-
-### "No paired AirPods found"
-
-1. Ensure AirPods are paired in System Settings > Bluetooth
-2. Connect to them at least once manually
-3. Restart the app
-
-### Mute doesn't work
-
-1. Check System Settings > Privacy & Security > Microphone
-2. Ensure the app has microphone access permission
-3. Make sure AirPods are connected and set as input device
-
-### Icon color wrong in light/dark mode
-
-The icon should automatically adapt when you switch modes. If it doesn't update immediately, toggle the mute state once.
+- macOS 13+ (the AirPods mute gesture needs Sonoma/Sequoia+ and recent AirPods firmware)
+- Swift toolchain (Command Line Tools: `xcode-select --install`) — no full Xcode needed for `build.sh`
+- AirPods Pro / AirPods Max / AirPods (with the mute gesture), paired via Bluetooth
 
 ## Credits
 
+- Upstream: [cyanicr/podsmute](https://github.com/cyanicr/podsmute)
 - Protocol research: [librepods](https://github.com/kavishdevar/librepods)
 
 ## License
 
-MIT License
+MIT (inherited from upstream).

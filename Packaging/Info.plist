@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Concrete Info.plist used by the SPM/build.sh packaging path. -->
+    <!-- (The Xcode build uses PodsMute/App/Info.plist with $(VAR) substitutions.) -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>PodsMute</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.podsmute.app</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>PodsMute</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <!-- Menu-bar-only app: no Dock icon. -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+
+    <!-- Privacy descriptions (shown in the permission prompts). -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>PodsMute needs Bluetooth access to detect your AirPods connection status.</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>PodsMute needs Bluetooth access to detect your AirPods.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>PodsMute needs microphone access to control the system-wide mute state.</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsSecureStateRestoration</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>

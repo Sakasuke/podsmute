@@ -84,6 +84,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupAudioAccessoryMonitoring() {
+        // Diagnostic mode: run with `PODSMUTE_DEBUG=1` to also watch speculative
+        // notification names and log every notification to Console.app. Use this to
+        // confirm which notification your macOS version posts when you press the stem.
+        audioAccessoryMonitor.debugMode = ProcessInfo.processInfo.environment["PODSMUTE_DEBUG"] != nil
+
         // Set up callback for mute state changes from AirPods
         audioAccessoryMonitor.onMuteStateChanged = { [weak self] state in
             guard let self = self else { return }
