@@ -134,18 +134,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupGlobalHotKey() {
-        // ⌃⌥⌘M — unlikely to collide with app shortcuts, works from any app.
+        // ⇧⌥⌘M — unlikely to collide with app shortcuts, works from any app.
         hotKey = GlobalHotKey(
             keyCode: UInt32(kVK_ANSI_M),
-            modifiers: UInt32(controlKey | optionKey | cmdKey))
+            modifiers: UInt32(shiftKey | optionKey | cmdKey))
         hotKey?.onTrigger = { [weak self] in
             print("[AppDelegate] Global mute hotkey pressed")
             self?.performToggle()
         }
         let ok = hotKey?.register() ?? false
         Logger(subsystem: "com.podsmute.app", category: "AppDelegate")
-            .info("Global hotkey Ctrl+Opt+Cmd+M registered: \(ok, privacy: .public)")
-        print("[AppDelegate] Global hotkey ⌃⌥⌘M registered: \(ok)")
+            .info("Global hotkey Shift+Opt+Cmd+M registered: \(ok, privacy: .public)")
+        print("[AppDelegate] Global hotkey ⇧⌥⌘M registered: \(ok)")
     }
 
     /// Toggle mute across all input devices and refresh the menu-bar UI. Safe to call

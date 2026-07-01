@@ -2,7 +2,7 @@
 
 A macOS menu bar app for **system‑wide microphone mute** — one press mutes/unmutes you in **Google Meet, Zoom, Slack huddles** and every other app at once, by muting the input device(s) directly.
 
-Trigger it with a **global keyboard shortcut (⌃⌥⌘M)** or by **left‑clicking the menu‑bar icon**.
+Trigger it with a **global keyboard shortcut (⇧⌥⌘M)** or by **left‑clicking the menu‑bar icon**.
 
 This is a fork of [cyanicr/podsmute](https://github.com/cyanicr/podsmute). See [What this fork adds](#what-this-fork-adds).
 
@@ -54,7 +54,7 @@ cd Airpods-mute
 
 メニューバーにヘッドフォンのアイコンが出れば起動しています。ミュートの切り替えは:
 
-- **グローバルショートカット `⌃⌥⌘M`**(Control+Option+Command+M)— どのアプリが前面でも効く。会議中はこれを押すだけ。
+- **グローバルショートカット `⇧⌥⌘M`**(Shift+Option+Command+M)— どのアプリが前面でも効く。会議中はこれを押すだけ。
 - **メニューバーのアイコンを左クリック** — ワンタップでON/OFF。
 - 右クリック（またはControl+クリック）でメニュー。
 

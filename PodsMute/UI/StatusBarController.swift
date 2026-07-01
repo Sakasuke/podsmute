@@ -74,13 +74,13 @@ final class StatusBarController {
         muteStatusItem.isEnabled = false
         menu.addItem(muteStatusItem)
 
-        // Toggle mute action — shows the global shortcut (⌃⌥⌘M).
+        // Toggle mute action — shows the global shortcut (⇧⌥⌘M).
         let toggleItem = NSMenuItem(
             title: "Toggle Mute",
             action: #selector(toggleMute),
             keyEquivalent: "m"
         )
-        toggleItem.keyEquivalentModifierMask = [.control, .option, .command]
+        toggleItem.keyEquivalentModifierMask = [.shift, .option, .command]
         toggleItem.target = self
         menu.addItem(toggleItem)
 
