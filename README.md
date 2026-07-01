@@ -8,7 +8,9 @@ This is a fork of [cyanicr/podsmute](https://github.com/cyanicr/podsmute). See [
 
 ## なぜ効くのか / How it works
 
-普通のアプリ (Meet / Zoom / Slack) は AirPods の「ミュート」ジェスチャに対応していません。このアプリは、AirPods を押したときに macOS の `audioaccessoryd` が出す通知 (`com.apple.audioaccessoryd.MuteState`) を捕まえ、**Core Audio で入力デバイス自体をミュート**します。入力デバイスをミュートするので、**どのアプリを使っていても相手にはあなたの声が届きません。**
+普通のアプリ (Meet / Zoom / Slack) は AirPods の「ミュート」ジェスチャに対応していません。このアプリは、AirPods を押したときに macOS の `audioaccessoryd` が出す通知 (`com.apple.audioaccessoryd.MuteState`) を捕まえ、**Core Audio で入力デバイスをミュート**します。入力デバイスをミュートするので、**どのアプリを使っていても相手にはあなたの声が届きません。**
+
+> **全入力デバイスをまとめてミュートします。** 既定の1台だけをミュートすると、会議アプリが別のデバイス(例: 既定は内蔵マイクなのに会議は AirPods を使用)を掴んでいたときに無音になりません。そこで実在する入力デバイス(内蔵マイク・AirPods・USBマイク等)を**全部同時に**ミュート/解除します(Teams等の仮想デバイスは除外)。デバイスが増減・切替しても、その都度いまのミュート状態を再適用します。
 
 ```
 AirPods stem press ──▶ audioaccessoryd posts a Darwin notification
