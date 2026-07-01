@@ -35,7 +35,8 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("Cocoa"),
                 .linkedFramework("CoreAudio"),
-                .linkedFramework("IOBluetooth")
+                .linkedFramework("IOBluetooth"),
+                .linkedFramework("Carbon")
             ]
         )
     ]

@@ -1,8 +1,13 @@
 # PodsMute (Airpods-mute fork)
 
-A macOS menu bar app that turns the **AirPods mute gesture** into a **system‑wide microphone mute** — so a single press of your AirPods Pro stem mutes/unmutes you in **Google Meet, Zoom, and Slack huddles** (and every other app), no matter whether that app supports the AirPods mute feature itself.
+A macOS menu bar app for **system‑wide microphone mute** — one press mutes/unmutes you in **Google Meet, Zoom, Slack huddles** and every other app at once, by muting the input device(s) directly.
+
+Trigger it with a **global keyboard shortcut (⌃⌥⌘M)** or by **left‑clicking the menu‑bar icon**.
 
 This is a fork of [cyanicr/podsmute](https://github.com/cyanicr/podsmute). See [What this fork adds](#what-this-fork-adds).
+
+> ### なぜ AirPods のステム押しではなくショートカットなのか
+> 元の podsmute は AirPods の「消音ジェスチャ」を捕まえる方式ですが、検証の結果 **macOS (Sonoma〜Tahoe) では Slack / Meet / Zoom に対してこのジェスチャが機能しません**。これらのアプリは OS に「通話(電話/FaceTime)」として認識されず、AirPods が常に *メディア再生モード* のままになるため、消音ジェスチャ自体が発動せず、捕まえるべきイベントが生まれないからです(audioaccessoryd のログにミュートイベントが一切出ないことを確認済み)。そこで本フォークでは、**確実に効くグローバルショートカット**を主操作にしています。ミュート機構(全入力デバイス一括ミュート)は同じで、どのアプリでも相手に声が届きません。
 
 ---
 
@@ -47,7 +52,13 @@ cd Airpods-mute
 
 `dist/PodsMute.app` が生成されます（DMG も作るなら `./make-dmg.sh` → `dist/PodsMute.dmg`）。
 
-メニューバーにヘッドフォンのアイコンが出れば起動しています。**アイコンを左クリックで一発ミュートON/OFF**、右クリック（またはControl+クリック）でメニューです。
+メニューバーにヘッドフォンのアイコンが出れば起動しています。ミュートの切り替えは:
+
+- **グローバルショートカット `⌃⌥⌘M`**(Control+Option+Command+M)— どのアプリが前面でも効く。会議中はこれを押すだけ。
+- **メニューバーのアイコンを左クリック** — ワンタップでON/OFF。
+- 右クリック（またはControl+クリック）でメニュー。
+
+🟢 緑=ミュート解除 / 🔴 赤=ミュート。**メニューバーのバッジが正解の状態**です(会議アプリ自身のミュートボタン表示とは連動しません)。
 
 ### 2. macOS 側で AirPods のミュートジェスチャを有効化
 
