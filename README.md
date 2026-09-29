@@ -1,103 +1,129 @@
-# PodsMute (Airpods-mute fork)
+<p align="center">
+  <img src="docs/hero.png" alt="PodsMute — 会議中の全マイクを、ワンキーでミュート" width="100%">
+</p>
 
-A macOS menu bar app for **system‑wide microphone mute** — one press mutes/unmutes you in **Google Meet, Zoom, Slack huddles** and every other app at once, by muting the input device(s) directly.
+# PodsMute
 
-Trigger it with a **global keyboard shortcut (⇧⌥⌘M)** or by **left‑clicking the menu‑bar icon**.
+**会議中の全マイクを、ワンキーで確実にミュート。** macOS のメニューバーに常駐する、無料のオープンソースアプリです。
 
-This is a fork of [cyanicr/podsmute](https://github.com/cyanicr/podsmute). See [What this fork adds](#what-this-fork-adds).
+<p>
+  <a href="https://github.com/Sakasuke/podsmute/releases/latest"><b>⬇︎ 最新版をダウンロード (DMG)</b></a>
+  &nbsp;·&nbsp; macOS 13 以降 &nbsp;·&nbsp; Universal (Apple Silicon / Intel) &nbsp;·&nbsp; MIT License
+</p>
 
-> ### なぜ AirPods のステム押しではなくショートカットなのか
-> 元の podsmute は AirPods の「消音ジェスチャ」を捕まえる方式ですが、検証の結果 **macOS (Sonoma〜Tahoe) では Slack / Meet / Zoom に対してこのジェスチャが機能しません**。これらのアプリは OS に「通話(電話/FaceTime)」として認識されず、AirPods が常に *メディア再生モード* のままになるため、消音ジェスチャ自体が発動せず、捕まえるべきイベントが生まれないからです(audioaccessoryd のログにミュートイベントが一切出ないことを確認済み)。そこで本フォークでは、**確実に効くグローバルショートカット**を主操作にしています。ミュート機構(全入力デバイス一括ミュート)は同じで、どのアプリでも相手に声が届きません。
+> **English:** PodsMute is a tiny menu-bar app that mutes **every** microphone on your Mac with one global hotkey (**⇧⌥⌘M**) — in Google Meet, Zoom, Slack huddles, Teams, or anything else. Free, MIT-licensed, no network code. Jump to [Install](#使い方3ステップ) · [Build from source](#ソースからビルド) · [Troubleshooting](#troubleshooting).
 
 ---
+
+## こんな経験、ありませんか？
+
+- 話し始めてから「ミュートのままだった」と気づく。逆に「解除したつもりが…聞こえていた」
+- Meet・Zoom・Slack…アプリごとにミュートボタンの場所も操作も違う
+- AirPods を使っているつもりが、会議アプリは**別のマイク**を掴んでいて、ミュートしても声が漏れる
+- 画面共有中に、ミュートのためだけにウィンドウを切り替えたくない
+
+## PodsMute でできること
+
+| | |
+| --- | --- |
+| ⌨️ **どのアプリが前面でも一発** | **`⇧⌥⌘M`**(Shift + Option + Command + M)でミュート / 解除。会議中はこれだけ覚えれば OK |
+| 🎙 **全マイクをまとめてミュート** | 内蔵マイク・AirPods・USB マイクなど、実在する入力デバイスを**全部同時に**ミュート。会議アプリがどのデバイスを使っていても声が届きません(Teams などの仮想デバイスは除外)。デバイスの増減・切り替えがあっても、その時点のミュート状態を再適用します |
+| 🚦 **状態が一目で分かる** | メニューバーのアイコンのバッジが、🟢 緑 = 話せる / 🔴 赤 = ミュート中 |
+| 🖱 **クリックでも切り替え** | アイコンを**左クリック**でワンタップ切り替え。**右クリック**(または Control + クリック)でメニュー |
+| 🪶 **軽い** | Dock に出ないメニューバー常駐アプリ。起動直後の実測は CPU ほぼ 0%、実質メモリ約 14 MB |
+| 🔒 **権限は最小限** | ホットキーは Carbon の `RegisterEventHotKey` を使うので、**アクセシビリティ / 入力監視の許可は不要**。ネットワーク通信のコードは含まれていません(ソースで確認できます) |
+| 🆓 **無料・オープンソース** | MIT License。改造も再配布も自由です |
+
+## 使い方(3ステップ)
+
+1. **[最新の DMG をダウンロード](https://github.com/Sakasuke/podsmute/releases/latest)** → 開いて、`PodsMute` を `Applications` フォルダにドラッグ
+2. **初回だけ**: Applications の `PodsMute` を **右クリック →「開く」**
+   - Apple の公証(notarization)を受けていない、手元で署名(ad-hoc)したアプリのため、初回は「開発元を確認できません」と表示されます。右クリックから開くか、**システム設定 → プライバシーとセキュリティ → 「このまま開く」** で一度許可すれば以後は普通に起動します
+   - Bluetooth のアクセス許可を聞かれることがあります(メニューの「AirPods 接続状態」表示に使います)
+3. メニューバーにアイコンが出たら準備完了。**`⇧⌥⌘M`** で全マイクがミュート、もう一度押すと解除
+
+ログイン時に自動で起動したい場合は、**システム設定 → 一般 → ログイン項目 →「ログイン時に開く」** に PodsMute を追加してください。
+
+### 状態の見方
+
+| バッジ | 意味 |
+| --- | --- |
+| 🟢 緑のマイク | ミュート解除(相手に聞こえる) |
+| 🔴 赤のマイク(斜線) | ミュート中(相手に聞こえない) |
+
+> ### ⚠️ これは「OS レベル」のミュートです
+> Meet / Zoom / Slack の**画面上のミュートボタンとは連動しません**。アプリ側が「ミュート解除」と表示していても、PodsMute のバッジが 🔴 なら相手には聞こえていません。**メニューバーのバッジが正解の状態です。**
+
+<details>
+<summary><b>AirPods のステム操作でもミュートしたい(実験的)</b></summary>
+
+元の podsmute の機能で、AirPods の「ミュート / ミュート解除」ジェスチャを捕まえてミュートします。ただし、macOS(Sonoma〜Tahoe)では Meet / Zoom / Slack が OS に「通話(電話 / FaceTime)」として認識されず、AirPods が常にメディア再生モードのままになるため、**このジェスチャ自体が発動しない**ことを確認しています(`audioaccessoryd` のログにミュートイベントが出ません)。そのため、このフォークでは確実に効くグローバルショートカットを主操作にしています。ジェスチャが使える環境では次のとおりです。
+
+1. AirPods Pro のファームウェアを最新に(mute / unmute は **6A300 以降**が必要)
+2. **システム設定 →(サイドバーの)お使いの AirPods** →「通話コントロール」で、ステムの 1 回押しまたは 2 回押しに **「ミュート / ミュート解除」** を割り当てる
+3. 通話中(マイクが使われている状態)にステムを押す
+
+</details>
+
+## 動作環境
+
+- **macOS 13 以降**
+- **Universal バイナリ**(Apple Silicon + Intel)。**Apple Silicon で動作確認済み。Intel 向けもビルドに含めていますが、実機では未検証**です。動かない場合は [Issue](https://github.com/Sakasuke/podsmute/issues) で教えてください
+- AirPods は不要です(ホットキーだけで使えます)
+
+## 既知の事項
+
+- Apple の公証を受けていないため、初回起動に「右クリック →『開く』」が必要です。
+- 数日間の連続稼働で、実質メモリ(圧縮分を含む)が数百 MB まで増えていた事例を 1 件観測しました。原因は調査中で、短時間の検証では再現していません。気になる場合は、いったん終了して起動し直してください。
+
+---
+
+## ソースからビルド
+
+**Command Line Tools だけ**でビルドできます(フル Xcode は不要)。
+
+```bash
+git clone https://github.com/Sakasuke/podsmute.git
+cd podsmute
+./build.sh        # dist/PodsMute.app を生成(Universal。未対応の環境では実行中の CPU のみ)
+./make-dmg.sh     # dist/PodsMute.dmg も作る
+```
+
+Xcode で開く場合(元のフロー): `brew install xcodegen && xcodegen generate && open PodsMute.xcodeproj`
 
 ## なぜ効くのか / How it works
 
-普通のアプリ (Meet / Zoom / Slack) は AirPods の「ミュート」ジェスチャに対応していません。このアプリは、AirPods を押したときに macOS の `audioaccessoryd` が出す通知 (`com.apple.audioaccessoryd.MuteState`) を捕まえ、**Core Audio で入力デバイスをミュート**します。入力デバイスをミュートするので、**どのアプリを使っていても相手にはあなたの声が届きません。**
-
-> **全入力デバイスをまとめてミュートします。** 既定の1台だけをミュートすると、会議アプリが別のデバイス(例: 既定は内蔵マイクなのに会議は AirPods を使用)を掴んでいたときに無音になりません。そこで実在する入力デバイス(内蔵マイク・AirPods・USBマイク等)を**全部同時に**ミュート/解除します(Teams等の仮想デバイスは除外)。デバイスが増減・切替しても、その都度いまのミュート状態を再適用します。
+普通の会議アプリは AirPods の「ミュート」ジェスチャに対応していません。PodsMute は **Core Audio で入力デバイスそのものをミュート**します。デバイスがミュートされれば、どのアプリを使っていても相手には声が届きません。
 
 ```
-AirPods stem press ──▶ audioaccessoryd posts a Darwin notification
-                          │
-                          ▼
-                    PodsMute catches it
-                          │
-                          ▼
-        Core Audio: default input device mute = ON/OFF   ← works in ALL apps
+⇧⌥⌘M (global hotkey)        ─┐
+menu-bar icon click          ─┼──▶  PodsMute
+AirPods stem press (optional)─┘         │
+   (audioaccessoryd notification)       ▼
+                       Core Audio: mute ALL real input devices  ← works in ALL apps
 ```
 
-> **重要:** これは OS レベルのミュートです。Meet / Zoom / Slack の *アプリ内* ミュートボタンの表示とは連動しません。アプリ側が「ミュート解除」に見えても、メニューバーのバッジが赤 (Muted) なら相手には聞こえていません。**メニューバーのバッジが正解の状態です。**
-
----
-
-## 使い方 (クイックスタート)
-
-### 0. DMG からインストール（ビルド不要）
-
-`dist/PodsMute.dmg` をダブルクリック → **PodsMute を Applications フォルダにドラッグ** → `/Applications/PodsMute.app` を起動。
-
-> ⚠️ **初回起動**: このアプリはあなたのMac用にローカル署名(ad-hoc)しているため、初回は「開発元を確認できない」と出ます。**アプリを右クリック → 「開く」**、または **システム設定 → プライバシーとセキュリティ → 「このまま開く」** で一度許可すればOKです。
-
-自分でビルドし直す/DMGを作り直す場合は下記。
-
-### 1. ビルド（フル Xcode は不要）
-
-このフォークは **Command Line Tools だけ** でビルドできます（`swift` があれば OK）。
-
-```bash
-cd Airpods-mute
-./build.sh
-```
-
-`dist/PodsMute.app` が生成されます（DMG も作るなら `./make-dmg.sh` → `dist/PodsMute.dmg`）。
-
-メニューバーにヘッドフォンのアイコンが出れば起動しています。ミュートの切り替えは:
-
-- **グローバルショートカット `⇧⌥⌘M`**(Shift+Option+Command+M)— どのアプリが前面でも効く。会議中はこれを押すだけ。
-- **メニューバーのアイコンを左クリック** — ワンタップでON/OFF。
-- 右クリック（またはControl+クリック）でメニュー。
-
-🟢 緑=ミュート解除 / 🔴 赤=ミュート。**メニューバーのバッジが正解の状態**です(会議アプリ自身のミュートボタン表示とは連動しません)。
-
-### 2. macOS 側で AirPods のミュートジェスチャを有効化
-
-1. AirPods Pro のファームウェアを最新に（**mute/unmute は 6A300 以降**が必要）。
-2. **システム設定 → (サイドバーの) お使いの AirPods** を開く。
-3. 通話コントロールで、ステムの **1回押し** または **2回押し** に **「ミュート / ミュート解除 (Mute & unmute)」** を割り当てる。
-
-### 3. 通話中に使う
-
-Meet / Zoom / Slack ハドルなどで **マイクが使われている状態**(=通話中)にステムを押すと、PodsMute がミュート/解除します。メニューバーのバッジで確認:
-
-- 🟢 緑のマイク = ミュート解除（相手に聞こえる）
-- 🔴 赤のマイク（スラッシュ）= ミュート（相手に聞こえない）
-
-左クリックでも手動トグル、右クリックでメニューが出ます。
-
----
+> **全入力デバイスをまとめてミュートします。** 既定の 1 台だけをミュートすると、会議アプリが別のデバイス(例: 既定は内蔵マイクなのに会議は AirPods を使用)を掴んでいたときに無音になりません。そこで実在する入力デバイスを**全部同時に**ミュート / 解除します(Teams 等の仮想デバイスは除外)。
 
 ## What this fork adds
 
+This is a fork of [cyanicr/podsmute](https://github.com/cyanicr/podsmute).
+
 | Area | Upstream | This fork |
 | --- | --- | --- |
-| Build | Requires full **Xcode** + `xcodegen` | Also builds with **Command Line Tools only** via `Package.swift` + `build.sh` (`swift build`) |
+| Trigger | AirPods mute gesture | Adds a **global hotkey (⇧⌥⌘M)**; left-clicking the menu-bar icon is a one-tap toggle |
+| Mute scope | Default input device | **All real input devices** (virtual / loopback devices skipped) |
+| Build | Requires full **Xcode** + `xcodegen` | Also builds with **Command Line Tools only** via `Package.swift` + `build.sh` (`swift build`, Universal) |
+| Distribution | Build it yourself | Prebuilt **DMG** on the [Releases](https://github.com/Sakasuke/podsmute/releases) page |
 | Entry point | SwiftUI `@main` (`App/PodsMuteApp.swift`) | Adds AppKit `App/main.swift` for the SPM build (SwiftUI file kept for the Xcode build) |
-| Mute detection | Registers several speculative notifications + distributed‑center listeners **always on** | Listens to `com.apple.audioaccessoryd.MuteState` by default; **debounces duplicates** and **suppresses the echo** from our own mute change so one press = one toggle; extra names gated behind `PODSMUTE_DEBUG` |
+| Mute detection | Registers several speculative notifications + distributed-center listeners **always on** | Listens to `com.apple.audioaccessoryd.MuteState` by default; **debounces duplicates** and **suppresses the echo** from our own mute change so one press = one toggle; extra names gated behind `PODSMUTE_DEBUG` |
 | Diagnostics | `print` to stdout (invisible when launched as a bundle) | `os.Logger` (subsystem `com.podsmute.app`) visible in **Console.app**, plus a `PODSMUTE_DEBUG=1` mode |
 
-Both build paths still share the same services (`AudioMuteController`, `AudioAccessoryMonitor`, `BluetoothManager`, `StatusBarController`).
-
-### Two ways to build
-
-- **No Xcode (recommended here):** `./build.sh`
-- **With Xcode:** `brew install xcodegen && xcodegen generate && open PodsMute.xcodeproj` (upstream flow)
-
----
+Both build paths share the same services (`AudioMuteController`, `AudioAccessoryMonitor`, `BluetoothManager`, `StatusBarController`).
 
 ## Verifying it works (without a live call)
 
-You can simulate an AirPods press by posting the same Darwin notification, then check the input device's mute state flips:
+You can simulate an AirPods press by posting the same Darwin notification, then check that the badge flips:
 
 ```bash
 open dist/PodsMute.app
@@ -105,50 +131,36 @@ open dist/PodsMute.app
 notifyutil -p com.apple.audioaccessoryd.MuteState   # = one "press"
 ```
 
-Watch the menu bar badge toggle red/green. This is exactly how this fork was verified.
+Watch the menu-bar badge toggle red / green.
 
-## Diagnostics / Troubleshooting
+## Troubleshooting
 
-**Nothing happens when I press my AirPods during a call.**
-The most likely cause is that macOS didn't post `com.apple.audioaccessoryd.MuteState`. Confirm what your macOS version emits:
+**Nothing happens when I press ⇧⌥⌘M.**
+Another app may already own that shortcut. Check that the PodsMute icon is in the menu bar, and try left-clicking the icon: if the badge flips, the mute itself works and only the shortcut is taken.
+
+**The badge toggles but I'm still heard (or still muted).**
+Your input device must support the Core Audio mute property. Check System Settings → Sound → Input. The built-in mic and AirPods both support mute on recent macOS.
+
+**The app's own mute button (Zoom / Meet) disagrees with the badge.**
+Expected — this app mutes at the OS level, independent of the app's button. Trust the menu-bar badge.
+
+**AirPods stem press does nothing during a call.**
+See the *AirPods* section above — on modern macOS, Meet / Zoom / Slack don't put AirPods into call mode, so the gesture never fires. Use the hotkey. To see what your macOS emits, run in diagnostic mode and watch the log:
 
 ```bash
-# Run the app in diagnostic mode (logs every notification, watches extra names):
-PODSMUTE_DEBUG=1 dist/PodsMute.app/Contents/MacOS/PodsMute
-```
-
-Then, in **Console.app**, filter by subsystem `com.podsmute.app` (or run):
-
-```bash
+# Launch with the debug switch (logs every notification, watches extra names):
+open -n --env PODSMUTE_DEBUG=1 dist/PodsMute.app
+# Then stream the log (or filter subsystem com.podsmute.app in Console.app):
 log stream --level debug --predicate 'subsystem == "com.podsmute.app"'
 ```
 
-Press your AirPods during a call and look for `Notification received: …`.
-- If you see it → detection works; check that your input device supports mute (below).
-- If you see nothing → the OS isn't posting the notification. Make sure the AirPods firmware is ≥ 6A300, the "Mute & unmute" gesture is assigned, and you're actually in a call (an app is using the mic).
-
-**The badge toggles but I'm still heard (or still muted).**
-Your default input device must support the Core Audio mute property. Check the current one:
-- System Settings → Sound → Input. The built‑in mic and AirPods both support mute on recent macOS.
-
-**The app's own mute button (Zoom/Meet) disagrees with the badge.**
-Expected — this app mutes at the OS level, independent of the app's button. Trust the menu bar badge.
-
-## Run at login
-
-Copy the app to `/Applications`, then add it in **System Settings → General → Login Items → Open at Login**.
-
-## Requirements
-
-- macOS 13+ (the AirPods mute gesture needs Sonoma/Sequoia+ and recent AirPods firmware)
-- Swift toolchain (Command Line Tools: `xcode-select --install`) — no full Xcode needed for `build.sh`
-- AirPods Pro / AirPods Max / AirPods (with the mute gesture), paired via Bluetooth
+> Launch the app with Finder or `open`. Running the binary directly from a terminal can be aborted by macOS privacy protection (TCC) when the terminal app has no Bluetooth usage description.
 
 ## Credits
 
-- Upstream: [cyanicr/podsmute](https://github.com/cyanicr/podsmute)
+- Upstream: [cyanicr/podsmute](https://github.com/cyanicr/podsmute) — the original idea and implementation
 - Protocol research: [librepods](https://github.com/kavishdevar/librepods)
 
 ## License
 
-MIT (inherited from upstream).
+[MIT](LICENSE). Upstream ([cyanicr/podsmute](https://github.com/cyanicr/podsmute)) is MIT-licensed as stated in its README; this fork's changes are released under the same license.
