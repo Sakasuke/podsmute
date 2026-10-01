@@ -13,6 +13,12 @@
 //  `isMuted` is our own logical intent — the single source of truth for the badge — and
 //  it is re-asserted onto the device set whenever the audio devices change.
 //
+//  v1.0.1: re-asserting must never feed itself. In some coreaudiod states (seen on
+//  macOS 27) every mute write makes coreaudiod re-pick and re-announce the default
+//  input, which fired our listener, which wrote again — 2–3 writes/s all night, keeping
+//  the Mac awake and hot. Now we only write a device whose mute differs from the
+//  target, coalesce notification bursts, and back off if a device keeps reverting.
+//
 
 import Foundation
 import CoreAudio
@@ -36,6 +42,23 @@ final class AudioMuteController: ObservableObject {
 
     private var deviceListChangeListenerBlock: AudioObjectPropertyListenerBlock?
     private var defaultDeviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
+
+    /// Serial queue for Core Audio change notifications. The re-assert state below is
+    /// only touched on this queue.
+    private let listenerQueue = DispatchQueue(label: "PodsMute.AudioMuteController.listeners")
+    private var pendingReassert: DispatchWorkItem?
+    /// When automatic re-asserts last had to write a device (for the back-off below).
+    private var recentReassertWrites: [Date] = []
+    private var reassertSuspendedUntil = Date.distantPast
+
+    /// Notifications arrive in bursts (AirPods connecting fires several); handle the
+    /// burst once it settles.
+    private static let reassertDelay: TimeInterval = 0.3
+    /// If automatic re-asserts had to write `reassertWriteLimit` times within
+    /// `reassertWindow`, some device is fighting us — pause for `reassertBackoff`.
+    private static let reassertWriteLimit = 5
+    private static let reassertWindow: TimeInterval = 10
+    private static let reassertBackoff: TimeInterval = 30
 
     private static let muteAddress = AudioObjectPropertyAddress(
         mSelector: kAudioDevicePropertyMute,
@@ -67,7 +90,7 @@ final class AudioMuteController: ObservableObject {
     @discardableResult
     func toggleMuteThreadSafe() -> Bool? {
         let target = !isMuted
-        let applied = applyMuteToAllInputs(target)
+        let applied = applyMuteToAllInputs(target).controlled
         guard applied > 0 else {
             print("[AudioMuteController] toggleMuteThreadSafe: no controllable input devices")
             return nil
@@ -78,7 +101,7 @@ final class AudioMuteController: ObservableObject {
 
     /// Set mute across all input devices.
     func setMute(_ muted: Bool) {
-        let applied = applyMuteToAllInputs(muted)
+        let applied = applyMuteToAllInputs(muted).controlled
         print("[AudioMuteController] Applied mute=\(muted) to \(applied) input device(s)")
         publishMuted(muted)
     }
@@ -91,18 +114,38 @@ final class AudioMuteController: ObservableObject {
     // MARK: - Core: mute every real input device
 
     /// Apply `muted` to every real (non-virtual) input device that has a settable mute
-    /// control. Returns how many devices were set.
+    /// control. Devices already in that state are left alone — writing an unchanged
+    /// value is what let the re-assert loop feed itself.
+    /// - Returns: `controlled` = devices now in the target state, `written` = devices
+    ///   we actually had to write.
     @discardableResult
-    private func applyMuteToAllInputs(_ muted: Bool) -> Int {
+    private func applyMuteToAllInputs(_ muted: Bool) -> (controlled: Int, written: Int) {
         var addr = AudioMuteController.muteAddress
-        var applied = 0
+        let target: UInt32 = muted ? 1 : 0
+        var controlled = 0
+        var written = 0
         for device in realInputDeviceIDs() {
-            var value: UInt32 = muted ? 1 : 0
+            if deviceMuteValue(device) == target {
+                controlled += 1
+                continue
+            }
+            var value = target
             let result = AudioObjectSetPropertyData(
                 device, &addr, 0, nil, UInt32(MemoryLayout<UInt32>.size), &value)
-            if result == noErr { applied += 1 }
+            if result == noErr {
+                controlled += 1
+                written += 1
+            }
         }
-        return applied
+        return (controlled, written)
+    }
+
+    private func deviceMuteValue(_ device: AudioObjectID) -> UInt32? {
+        var addr = AudioMuteController.muteAddress
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &value) == noErr else { return nil }
+        return value
     }
 
     /// All input devices we should control: has an input stream, has a settable mute
@@ -206,12 +249,10 @@ final class AudioMuteController: ObservableObject {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain)
         deviceListChangeListenerBlock = { [weak self] _, _ in
-            guard let self = self else { return }
-            self.applyMuteToAllInputs(self.isMuted)
-            self.refreshDefaultDeviceDisplay()
+            self?.scheduleReassert()
         }
         AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &devicesAddr, nil, deviceListChangeListenerBlock!)
+            AudioObjectID(kAudioObjectSystemObject), &devicesAddr, listenerQueue, deviceListChangeListenerBlock!)
 
         // Default input changes: refresh the displayed name and re-assert mute.
         var defaultAddr = AudioObjectPropertyAddress(
@@ -219,12 +260,42 @@ final class AudioMuteController: ObservableObject {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain)
         defaultDeviceChangeListenerBlock = { [weak self] _, _ in
-            guard let self = self else { return }
-            self.applyMuteToAllInputs(self.isMuted)
-            self.refreshDefaultDeviceDisplay()
+            self?.scheduleReassert()
         }
         AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &defaultAddr, nil, defaultDeviceChangeListenerBlock!)
+            AudioObjectID(kAudioObjectSystemObject), &defaultAddr, listenerQueue, defaultDeviceChangeListenerBlock!)
+    }
+
+    /// Runs on `listenerQueue`. Collapses a burst of notifications into one re-assert.
+    private func scheduleReassert() {
+        pendingReassert?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.reassertAfterDeviceChange() }
+        pendingReassert = work
+        listenerQueue.asyncAfter(deadline: .now() + AudioMuteController.reassertDelay, execute: work)
+    }
+
+    /// Runs on `listenerQueue`.
+    private func reassertAfterDeviceChange() {
+        refreshDefaultDeviceDisplay()
+
+        let now = Date()
+        guard now >= reassertSuspendedUntil else { return }
+        guard applyMuteToAllInputs(isMuted).written > 0 else { return }
+
+        recentReassertWrites = recentReassertWrites.filter {
+            now.timeIntervalSince($0) < AudioMuteController.reassertWindow
+        } + [now]
+        guard recentReassertWrites.count >= AudioMuteController.reassertWriteLimit else { return }
+
+        // A device keeps reverting (or our writes keep re-triggering coreaudiod): stop
+        // chasing it, then try once more so a device that arrived meanwhile still gets
+        // our state.
+        recentReassertWrites.removeAll()
+        reassertSuspendedUntil = now.addingTimeInterval(AudioMuteController.reassertBackoff)
+        print("[AudioMuteController] Mute keeps being reverted; pausing automatic re-assert for \(Int(AudioMuteController.reassertBackoff)) s")
+        listenerQueue.asyncAfter(deadline: .now() + AudioMuteController.reassertBackoff) { [weak self] in
+            self?.scheduleReassert()
+        }
     }
 
     private func removeListeners() {
@@ -234,7 +305,7 @@ final class AudioMuteController: ObservableObject {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain)
             AudioObjectRemovePropertyListenerBlock(
-                AudioObjectID(kAudioObjectSystemObject), &addr, nil, block)
+                AudioObjectID(kAudioObjectSystemObject), &addr, listenerQueue, block)
             deviceListChangeListenerBlock = nil
         }
         if let block = defaultDeviceChangeListenerBlock {
@@ -243,7 +314,7 @@ final class AudioMuteController: ObservableObject {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain)
             AudioObjectRemovePropertyListenerBlock(
-                AudioObjectID(kAudioObjectSystemObject), &addr, nil, block)
+                AudioObjectID(kAudioObjectSystemObject), &addr, listenerQueue, block)
             defaultDeviceChangeListenerBlock = nil
         }
     }
